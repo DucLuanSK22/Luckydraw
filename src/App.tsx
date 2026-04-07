@@ -10,6 +10,7 @@ import confetti from 'canvas-confetti';
 import { cn } from './lib/utils';
 import logoDefault from './Image/Logo/logo.png';
 import heroDefault from './Image/Hero/hero.jpg';
+import spinSoundFile from './Sound/soundspin.mp3';
 
 interface Participant {
   id: string;
@@ -130,65 +131,158 @@ export default function App() {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [winnerSearchQuery, setWinnerSearchQuery] = useState('');
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
 
-  // Audio Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
   const spinAudioRef = useRef<HTMLAudioElement | null>(null);
-  const winAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Initialize Audio
-  useEffect(() => {
-    // Energetic background music for spinning
-    const spinAudio = new Audio('https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3');
-    spinAudio.loop = true;
-    spinAudio.volume = 0.4;
-    spinAudio.preload = 'auto';
-    spinAudio.crossOrigin = 'anonymous';
-    spinAudioRef.current = spinAudio;
+  const getAudioContext = useCallback(() => {
+    if (typeof window === 'undefined') return null;
 
-    // Deep, triumphant sound for winning
-    const winAudio = new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3');
-    winAudio.volume = 0.6;
-    winAudio.preload = 'auto';
-    winAudio.crossOrigin = 'anonymous';
-    winAudioRef.current = winAudio;
+    if (!audioContextRef.current) {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return null;
+      audioContextRef.current = new AudioContextClass();
+    }
 
-    // Pre-load sounds
-    spinAudio.load();
-    winAudio.load();
+    return audioContextRef.current;
   }, []);
 
-  // Function to unlock audio on first interaction
-  const unlockAudio = useCallback(() => {
-    if (audioUnlocked) return;
-    
-    // Play and immediately pause/reset to "unlock" the audio context in browsers
-    if (spinAudioRef.current) {
-      spinAudioRef.current.play().then(() => {
-        spinAudioRef.current?.pause();
-        spinAudioRef.current!.currentTime = 0;
-      }).catch(() => {});
-    }
-    if (winAudioRef.current) {
-      winAudioRef.current.play().then(() => {
-        winAudioRef.current?.pause();
-        winAudioRef.current!.currentTime = 0;
-      }).catch(() => {});
-    }
-    
-    setAudioUnlocked(true);
-    console.log("Audio unlocked via user interaction");
-  }, [audioUnlocked]);
+  const ensureAudioReady = useCallback(async () => {
+    const context = getAudioContext();
+    if (!context) return null;
 
-  // Add global click listener to unlock audio
-  useEffect(() => {
-    window.addEventListener('click', unlockAudio, { once: true });
-    window.addEventListener('touchstart', unlockAudio, { once: true });
-    return () => {
-      window.removeEventListener('click', unlockAudio);
-      window.removeEventListener('touchstart', unlockAudio);
-    };
-  }, [unlockAudio]);
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
+    return context;
+  }, [getAudioContext]);
+
+  const stopSpinSound = useCallback(() => {
+    if (spinAudioRef.current) {
+      spinAudioRef.current.pause();
+      spinAudioRef.current.currentTime = 0;
+    }
+  }, []);
+
+  const playSpinSound = useCallback(async () => {
+    stopSpinSound();
+    const context = await ensureAudioReady();
+    if (!context) return;
+
+    if (!spinAudioRef.current) {
+      spinAudioRef.current = new Audio(spinSoundFile);
+      spinAudioRef.current.preload = 'auto';
+      spinAudioRef.current.loop = true;
+      spinAudioRef.current.volume = 0.95;
+    }
+
+    spinAudioRef.current.currentTime = 0;
+    const playPromise = spinAudioRef.current.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        spinAudioRef.current?.load();
+        spinAudioRef.current?.play().catch(() => {});
+      });
+    }
+  }, [ensureAudioReady, stopSpinSound]);
+
+  const playWinSound = useCallback(async () => {
+    const context = await ensureAudioReady();
+    if (!context) return;
+
+    const master = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+    const filter = context.createBiquadFilter();
+
+    master.gain.value = 1.0;
+    compressor.threshold.value = -24;
+    compressor.knee.value = 22;
+    compressor.ratio.value = 8;
+    compressor.attack.value = 0.002;
+    compressor.release.value = 0.15;
+    filter.type = 'highpass';
+    filter.frequency.value = 150;
+    filter.Q.value = 1;
+
+    master.connect(filter);
+    filter.connect(compressor);
+    compressor.connect(context.destination);
+
+    const fanfare = [392, 523.25, 659.25, 783.99, 659.25, 523.25, 392, 587.33];
+    fanfare.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = index < 3 ? 'triangle' : 'sine';
+      oscillator.frequency.value = frequency;
+      gain.gain.value = 0.0001;
+
+      oscillator.connect(gain);
+      gain.connect(master);
+
+      const startTime = context.currentTime + index * 0.12;
+      const peakGain = index < 4 ? 0.48 : 0.34;
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(peakGain, startTime + 0.014);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.34);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + 0.37);
+    });
+
+    const shimmerOscillator = context.createOscillator();
+    const shimmerGain = context.createGain();
+    shimmerOscillator.type = 'sine';
+    shimmerOscillator.frequency.value = 1568;
+    shimmerGain.gain.value = 0.0001;
+    shimmerOscillator.connect(shimmerGain);
+    shimmerGain.connect(master);
+    const shimmerStart = context.currentTime + 0.22;
+    shimmerGain.gain.setValueAtTime(0.0001, shimmerStart);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.12, shimmerStart + 0.02);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, shimmerStart + 0.24);
+    shimmerOscillator.start(shimmerStart);
+    shimmerOscillator.stop(shimmerStart + 0.26);
+
+    const tailDelay = context.createDelay(1.2);
+    const tailFeedback = context.createGain();
+    const tailFilter = context.createBiquadFilter();
+    const tailGain = context.createGain();
+
+    tailDelay.delayTime.value = 0.28;
+    tailFeedback.gain.value = 0.22;
+    tailFilter.type = 'lowpass';
+    tailFilter.frequency.value = 1400;
+    tailFilter.Q.value = 0.8;
+    tailGain.gain.value = 0.0001;
+
+    tailGain.connect(tailFilter);
+    tailFilter.connect(tailDelay);
+    tailDelay.connect(tailFeedback);
+    tailFeedback.connect(tailDelay);
+    tailDelay.connect(master);
+
+    const tailChord = [392, 523.25, 659.25, 783.99];
+    tailChord.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = 'triangle';
+      oscillator.frequency.value = frequency;
+      gain.gain.value = 0.0001;
+
+      oscillator.connect(gain);
+      gain.connect(tailGain);
+
+      const startTime = context.currentTime + 0.86 + index * 0.015;
+      const peakGain = index === tailChord.length - 1 ? 0.12 : 0.09;
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(peakGain, startTime + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.95);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + 1.0);
+    });
+  }, [ensureAudioReady]);
 
   // Temporary states for settings modal
   const [tempSettings, setTempSettings] = useState<AppSettings>(settings);
@@ -240,23 +334,11 @@ export default function App() {
       return;
     }
 
-    unlockAudio();
     setIsSpinning(true);
     setIsConfirming(false);
     setShowFullInfo(false);
     
-    // Play spin sound
-    if (spinAudioRef.current) {
-      spinAudioRef.current.currentTime = 0;
-      const playPromise = spinAudioRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(e => {
-          console.log("Spin audio failed, retrying...", e);
-          spinAudioRef.current?.load();
-          spinAudioRef.current?.play();
-        });
-      }
-    }
+    void playSpinSound();
     
     // Shuffle animation
     spinIntervalRef.current = window.setInterval(() => {
@@ -269,22 +351,10 @@ export default function App() {
       if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
       
       // Stop spin sound
-      if (spinAudioRef.current) {
-        spinAudioRef.current.pause();
-      }
+      stopSpinSound();
 
       // Play win sound
-      if (winAudioRef.current) {
-        winAudioRef.current.currentTime = 0;
-        const playPromise = winAudioRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(e => {
-            console.log("Win audio failed, retrying...", e);
-            winAudioRef.current?.load();
-            winAudioRef.current?.play();
-          });
-        }
-      }
+      void playWinSound();
       
       const winner = availableParticipants[Math.floor(Math.random() * availableParticipants.length)];
       setDisplayPerson(winner);
@@ -304,7 +374,7 @@ export default function App() {
         colors: ['#FFD700', '#FFA500', '#FF4500', '#FFFFFF']
       });
     }, settings.spinDuration);
-  }, [isSpinning, availableParticipants, currentPrize, currentPrizeId, settings.spinDuration]);
+  }, [isSpinning, availableParticipants, currentPrize, currentPrizeId, settings.spinDuration, playSpinSound, playWinSound, stopSpinSound]);
 
   const handleConfirmWinner = () => {
     if (!displayPerson || !currentPrizeId) return;
