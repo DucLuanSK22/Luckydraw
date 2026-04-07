@@ -8,6 +8,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Settings, Trophy, Users, Play, RotateCcw, Trash2, Plus, X, ListChecks, Image as ImageIcon, Type as TypeIcon, Maximize, Download, AlertCircle, CheckCircle2, Info, Lock, Search } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { cn } from './lib/utils';
+import logoDefault from './Image/Logo/logo.png';
+import heroDefault from './Image/Hero/hero.jpg';
 
 interface Participant {
   id: string;
@@ -40,9 +42,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   titleColor: '#eab308', // yellow-500
   titleSize: 48,
   titleFont: 'Inter',
-  logoUrl: '',
+  logoUrl: logoDefault,
   logoSize: 60,
-  bgUrl: '',
+  bgUrl: heroDefault,
   spinDuration: 3000,
 };
 
@@ -100,7 +102,19 @@ export default function App() {
 
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('lucky-draw-settings');
-    return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Reset to defaults if saved values are not base64 data (i.e., they are old image paths)
+      const logoUrl = parsed.logoUrl?.startsWith('data:') ? parsed.logoUrl : logoDefault;
+      const bgUrl = parsed.bgUrl?.startsWith('data:') ? parsed.bgUrl : heroDefault;
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        logoUrl,
+        bgUrl,
+      };
+    }
+    return DEFAULT_SETTINGS;
   });
 
   const [currentPrizeId, setCurrentPrizeId] = useState<string>(prizes[0]?.id || '');
@@ -411,7 +425,7 @@ export default function App() {
     <div 
       className="min-h-screen bg-[#0f172a] text-white font-sans selection:bg-yellow-500/30 flex flex-col relative overflow-hidden"
       style={{
-        backgroundImage: settings.bgUrl ? `url(${settings.bgUrl})` : 'none',
+        backgroundImage: `url(${settings.bgUrl})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat'
@@ -768,7 +782,7 @@ export default function App() {
                       </label>
                       {tempSettings.logoUrl && (
                         <button 
-                          onClick={() => setTempSettings({ ...tempSettings, logoUrl: '' })}
+                          onClick={() => setTempSettings({ ...tempSettings, logoUrl: logoDefault })}
                           className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
                         >
                           <Trash2 size={18} />
@@ -803,7 +817,7 @@ export default function App() {
                       </label>
                       {tempSettings.bgUrl && (
                         <button 
-                          onClick={() => setTempSettings({ ...tempSettings, bgUrl: '' })}
+                          onClick={() => setTempSettings({ ...tempSettings, bgUrl: heroDefault })}
                           className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
                         >
                           <Trash2 size={18} />
